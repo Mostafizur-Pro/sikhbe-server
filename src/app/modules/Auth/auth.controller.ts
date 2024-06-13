@@ -1,108 +1,43 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken"; // for generating JWT tokens
-import { config, connection, pool, smsAPI } from "../../config";
+import { config, pool } from "../../config";
 import bcrypt from "bcryptjs";
-import axios from "axios";
-import catchAsync from "../../../shared/catchAsync";
-
-interface Employee {
-  id: number;
-  profile_id: string;
-  password: string;
-}
 
 const login = async (req: Request, res: Response, next: NextFunction) => {
   const { email, password } = req.body;
-  const number = email;
 
-  if (!email || !password) {
-    return res
-      .status(400)
-      .json({ success: false, message: "Email and password are required." });
-  }
   try {
     const connection = await pool.getConnection();
-    const [usersData]: any = await connection.query(
-      "SELECT * FROM users WHERE email = ? OR number = ?",
-      [email, number]
+
+    const [studentData]: any = await connection.query(
+      "SELECT * FROM student WHERE email = ?",
+      [email]
     );
-    const users = usersData[0];
-    const [empData]: any = await connection.query(
-      "SELECT * FROM employee_info WHERE emp_email = ? OR emp_number = ?",
-      [email, number]
-    );
-    const employees = empData[0];
-    const [clientData]: any = await connection.query(
-      "SELECT * FROM client_data WHERE email = ? OR number = ?",
-      [email, number]
-    );
-    const clients = clientData[0];
-    // Employee
-    if (employees) {
-      connection.release();
 
-      const isMatch = password === employees.password;
-
-      if (!isMatch) {
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials." });
-      }
-
-      const accessToken = jwt.sign(
-        { employeeId: employees.profile_id, email: employees?.email },
-        "secret",
-        { expiresIn: "7y" }
-      );
-
-      res.status(200).json({ success: true, accessToken, employees });
+    const student = studentData[0];
+    if (!student) {
+      return res.status(401).json({ message: "Can't find email." });
     }
 
-    // Client
-    if (clients) {
-      connection.release();
-      const isMatch = password === clients.password;
+    const isMatch = await bcrypt.compare(password, student.password);
 
-      if (!isMatch) {
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials." });
-      }
-
-      // Generate JWT token
-      const accessToken = jwt.sign(
-        { clientId: clients.profile_id, email: clients.email },
-        "secret",
-        { expiresIn: "7y" }
-      );
-
-      // Return success response with token
-      res.status(200).json({ success: true, accessToken, clients });
+    if (!isMatch) {
+      return res.status(401).json({ message: "Don't match password." });
     }
-    // Users
-    if (users) {
-      connection.release();
-      // Check if the password matches
-      const isMatch = password === users.password;
 
-      if (!isMatch) {
-        return res
-          .status(401)
-          .json({ success: false, message: "Invalid credentials." });
-      }
+    connection.release();
 
-      // Generate JWT token
-      const accessToken = jwt.sign(
-        { userId: users.profile_id, email: users?.email },
-        "secret",
-        { expiresIn: "7y" }
-      );
+    const token = jwt.sign(
+      { adminId: student.id, email: student.email },
+      // "secret",
+      config.jwt_secret as string,
+      { expiresIn: "1d" }
+    );
 
-      res.status(200).json({ success: true, accessToken, users });
-    }
+    res.status(200).json({ token, student });
   } catch (error) {
     console.error("Error logging in:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error." });
+    res.status(500).json({ message: "Internal Server Error." });
   }
 };
 
